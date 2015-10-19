@@ -71,9 +71,9 @@ type Item struct {
 
 // Return all items currently in the cache. This is made available for
 // serialization purposes.
-func (c *RRCache) Items() (itens []Item) {
+func (c *RRCache) Items() (items []Item) {
 	for k, e := range c.table {
-		itens = append(itens, Item{k, e.value})
+		items = append(items, Item{k, e.value})
 	}
 	return
 }
