@@ -12,7 +12,6 @@ type Database struct {
 }
 
 func Open(dbName string) (*Database, error) {
-	fmt.Println(dbName)
 	dbFile, err := sql.Open("sqlite3", dbName)
 	if err != nil {
 		return nil, err

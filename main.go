@@ -25,6 +25,7 @@ type dmsConfig struct {
 	IfName              string
 	Http                string
 	FriendlyName        string
+	MediaDBPath         string
 	LogHeaders          bool
 	NoTranscode         bool
 	StallEventSubscribe bool
@@ -52,6 +53,7 @@ var config = &dmsConfig{
 	Http:         ":1338",
 	FriendlyName: "",
 	LogHeaders:   false,
+	MediaDBPath:  filepath.Join(getHomeDir(), ".dms.db"),
 }
 
 func getHomeDir() string {
@@ -71,6 +73,7 @@ func main() {
 	ifName := flag.String("ifname", config.IfName, "specific SSDP network interface")
 	http := flag.String("http", config.Http, "http server port")
 	friendlyName := flag.String("friendlyName", config.FriendlyName, "server friendly name")
+	mediaDBPath := flag.String("mediadbpath", config.MediaDBPath, "catalogue db path")
 	logHeaders := flag.Bool("logHeaders", config.LogHeaders, "log HTTP headers")
 	configFilePath := flag.String("config", "", "json configuration file")
 	flag.BoolVar(&config.NoTranscode, "noTranscode", false, "disable transcoding")
@@ -91,8 +94,9 @@ func main() {
 	if len(*configFilePath) > 0 {
 		config.load(*configFilePath)
 	}
+
 	var err error
-	mediaDb, err = db.Open(filepath.Join(getHomeDir(), ".dms.db"))
+	mediaDb, err = db.Open(*mediaDBPath)
 	if err != nil {
 		panic(err)
 	}
