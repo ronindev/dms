@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/dms/db"
 	"github.com/anacrolix/dms/dlna"
 	"github.com/anacrolix/dms/ffmpeg"
 	"github.com/anacrolix/dms/soap"
@@ -224,7 +225,6 @@ type Server struct {
 	RootObjectPath string
 	rootDescXML    []byte
 	rootDeviceUUID string
-	FFProbeCache   Cache
 	closed         chan struct{}
 	ssdpStopped    chan struct{}
 	// The service SOAP handler keyed by service URN.
@@ -236,6 +236,7 @@ type Server struct {
 	// Stall event subscription requests until they drop. A workaround for
 	// some bad clients.
 	StallEventSubscribe bool
+	Catalogue           *db.Database
 }
 
 // UPnP SOAP service.
@@ -243,25 +244,6 @@ type UPnPService interface {
 	Handle(action string, argsXML []byte, r *http.Request) (respArgs map[string]string, err *upnp.Error)
 	Subscribe(callback []*url.URL, timeoutSeconds int) (sid string, actualTimeout int, err error)
 	Unsubscribe(sid string) error
-}
-
-type Cache interface {
-	Set(key interface{}, value interface{})
-	Get(key interface{}) (value interface{}, ok bool)
-}
-
-type dummyFFProbeCache struct{}
-
-func (dummyFFProbeCache) Set(interface{}, interface{}) {}
-
-func (dummyFFProbeCache) Get(interface{}) (interface{}, bool) {
-	return nil, false
-}
-
-// Public definition so that external modules can persist cache contents.
-type FfprobeCacheItem struct {
-	Key   ffmpegInfoCacheKey
-	Value *ffmpeg.Info
 }
 
 // update the UPnP object fields from ffprobe data
@@ -362,11 +344,6 @@ func (mt mimeType) Type() mimeTypeType {
 	return mimeTypeType(strings.SplitN(string(mt), "/", 2)[0])
 }
 
-type ffmpegInfoCacheKey struct {
-	Path    string
-	ModTime int64
-}
-
 func transcodeResources(host, path, resolution, duration string) (ret []upnpav.Resource) {
 	ret = make([]upnpav.Resource, 0, len(transcodes))
 	for k, v := range transcodes {
@@ -455,9 +432,9 @@ func (me *Server) serveDLNATranscode(w http.ResponseWriter, r *http.Request, pat
 	if !ok {
 		return
 	}
-	ffInfo, _ := me.ffmpegProbe(path_)
-	if ffInfo != nil {
-		if duration, err := ffInfo.Duration(); err == nil {
+	metadata, _ := me.metadataProbe(path_)
+	if metadata != nil {
+		if duration, err := metadata.FFmpegInfo.Duration(); err == nil {
 			s := fmt.Sprintf("%f", duration.Seconds())
 			w.Header().Set("content-duration", s)
 			w.Header().Set("x-content-duration", s)
@@ -850,9 +827,7 @@ func (srv *Server) Serve() (err error) {
 			log.Print(err)
 		}
 	}
-	if srv.FFProbeCache == nil {
-		srv.FFProbeCache = dummyFFProbeCache{}
-	}
+
 	srv.httpServeMux = http.NewServeMux()
 	srv.rootDeviceUUID = makeDeviceUuid(srv.FriendlyName)
 	srv.rootDescXML, err = xml.MarshalIndent(
@@ -929,24 +904,52 @@ func (me *Server) location(ip net.IP) string {
 }
 
 // Can return nil info with nil err if an earlier Probe gave an error.
-func (srv *Server) ffmpegProbe(path string) (info *ffmpeg.Info, err error) {
+func (srv *Server) metadataProbe(path string) (*db.Metadata, error) {
 	// We don't want relative paths in the cache.
-	path, err = filepath.Abs(path)
+	path, err := filepath.Abs(path)
 	if err != nil {
-		return
+		return nil, err
 	}
-	fi, err := os.Stat(path)
+
+	filename := filepath.Base(path)
+
+	hashsum, err := getFileHash(path)
 	if err != nil {
-		return
+		log.Printf("error computing hash of file %q: %q\n", path, err)
 	}
-	key := ffmpegInfoCacheKey{path, fi.ModTime().UnixNano()}
-	value, ok := srv.FFProbeCache.Get(key)
-	if !ok {
-		info, err = ffmpeg.Probe(path)
+	m, err := srv.Catalogue.Get(hashsum)
+	if err != nil {
+		log.Printf("error querying database: %q\n", err)
+		return nil, err
+	}
+
+	if m == nil {
+		ffmpeg, err := ffmpeg.Probe(path)
 		err = suppressFFmpegProbeDataErrors(err)
-		srv.FFProbeCache.Set(key, info)
-		return
+		if err == nil {
+			m = &db.Metadata{filename, ffmpeg}
+			err := srv.Catalogue.Set(hashsum, m)
+			if err != nil {
+				log.Printf("error saving to database file %q: %q\n", path, err)
+			}
+			return m, err
+		}
+		return nil, err
 	}
-	info = value.(*ffmpeg.Info)
-	return
+	return m, nil
+}
+
+func getFileHash(filename string) (string, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	chunk := make([]byte, 4*1024)
+	_, err = f.Read(chunk)
+	if err != nil {
+		return "", err
+	}
+	result := fmt.Sprintf("%x", md5.Sum(chunk))
+	return result, nil
 }

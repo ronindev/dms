@@ -13,6 +13,7 @@ import (
 )
 
 type Info struct {
+	Title   string
 	Format  map[string]interface{}
 	Streams []map[string]interface{}
 }

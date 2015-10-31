@@ -74,14 +74,15 @@ func (me *contentDirectoryService) cdsObjectToUpnpavObject(cdsObject object, fil
 		nativeBitrate uint
 		resDuration   string
 	)
-	ffInfo, probeErr := me.ffmpegProbe(entryFilePath)
+	metadata, probeErr := me.metadataProbe(entryFilePath)
 	switch probeErr {
 	case nil:
-		if ffInfo != nil {
-			nativeBitrate, _ = ffInfo.Bitrate()
-			if d, err := ffInfo.Duration(); err == nil {
+		if metadata != nil {
+			nativeBitrate, _ = metadata.FFmpegInfo.Bitrate()
+			if d, err := metadata.FFmpegInfo.Duration(); err == nil {
 				resDuration = misc.FormatDurationSexagesimal(d)
 			}
+			obj.Title = metadata.Title
 		}
 	case ffmpeg.FfprobeUnavailableError:
 	default:
@@ -91,8 +92,8 @@ func (me *contentDirectoryService) cdsObjectToUpnpavObject(cdsObject object, fil
 		obj.Title = fileInfo.Name()
 	}
 	resolution := func() string {
-		if ffInfo != nil {
-			for _, strm := range ffInfo.Streams {
+		if metadata != nil {
+			for _, strm := range metadata.FFmpegInfo.Streams {
 				if strm["codec_type"] != "video" {
 					continue
 				}

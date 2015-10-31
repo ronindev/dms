@@ -6,19 +6,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"runtime"
-	"sync"
 	"syscall"
 
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/anacrolix/dms/db"
 	"github.com/anacrolix/dms/dlna/dms"
-	"github.com/anacrolix/dms/rrcache"
 )
 
 type dmsConfig struct {
@@ -27,7 +26,6 @@ type dmsConfig struct {
 	Http                string
 	FriendlyName        string
 	LogHeaders          bool
-	FFprobeCachePath    string
 	NoTranscode         bool
 	StallEventSubscribe bool
 }
@@ -49,48 +47,22 @@ func (config *dmsConfig) load(configPath string) {
 
 //default config
 var config = &dmsConfig{
-	Path:             "",
-	IfName:           "",
-	Http:             ":1338",
-	FriendlyName:     "",
-	LogHeaders:       false,
-	FFprobeCachePath: getDefaultFFprobeCachePath(),
+	Path:         "",
+	IfName:       "",
+	Http:         ":1338",
+	FriendlyName: "",
+	LogHeaders:   false,
 }
 
-func getDefaultFFprobeCachePath() (path string) {
+func getHomeDir() string {
 	_user, err := user.Current()
 	if err != nil {
-		log.Print(err)
-		return
+		panic(err)
 	}
-	path = filepath.Join(_user.HomeDir, ".dms-ffprobe-cache")
-	return
+	return _user.HomeDir
 }
 
-type fFprobeCache struct {
-	c *rrcache.RRCache
-	sync.Mutex
-}
-
-func (fc *fFprobeCache) Get(key interface{}) (value interface{}, ok bool) {
-	fc.Lock()
-	defer fc.Unlock()
-	return fc.c.Get(key)
-}
-
-func (fc *fFprobeCache) Set(key interface{}, value interface{}) {
-	fc.Lock()
-	defer fc.Unlock()
-	var size int64
-	for _, v := range []interface{}{key, value} {
-		b, err := json.Marshal(v)
-		if err != nil {
-			panic(err)
-		}
-		size += int64(len(b))
-	}
-	fc.c.Set(key, value, size)
-}
+var mediaDb *db.Database
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
@@ -100,7 +72,6 @@ func main() {
 	http := flag.String("http", config.Http, "http server port")
 	friendlyName := flag.String("friendlyName", config.FriendlyName, "server friendly name")
 	logHeaders := flag.Bool("logHeaders", config.LogHeaders, "log HTTP headers")
-	fFprobeCachePath := flag.String("fFprobeCachePath", config.FFprobeCachePath, "path to FFprobe cache file")
 	configFilePath := flag.String("config", "", "json configuration file")
 	flag.BoolVar(&config.NoTranscode, "noTranscode", false, "disable transcoding")
 	flag.BoolVar(&config.StallEventSubscribe, "stallEventSubscribe", false, "workaround for some bad event subscribers")
@@ -116,17 +87,14 @@ func main() {
 	config.Http = *http
 	config.FriendlyName = *friendlyName
 	config.LogHeaders = *logHeaders
-	config.FFprobeCachePath = *fFprobeCachePath
 
 	if len(*configFilePath) > 0 {
 		config.load(*configFilePath)
 	}
-
-	cache := &fFprobeCache{
-		c: rrcache.New(64 << 20),
-	}
-	if err := cache.load(config.FFprobeCachePath); err != nil {
-		log.Print(err)
+	var err error
+	mediaDb, err = db.Open(filepath.Join(getHomeDir(), ".dms.db"))
+	if err != nil {
+		panic(err)
 	}
 
 	dmsServer := &dms.Server{
@@ -155,7 +123,6 @@ func main() {
 		}(),
 		FriendlyName:   config.FriendlyName,
 		RootObjectPath: filepath.Clean(config.Path),
-		FFProbeCache:   cache,
 		LogHeaders:     config.LogHeaders,
 		NoTranscode:    config.NoTranscode,
 		Icons: []dms.Icon{
@@ -175,6 +142,7 @@ func main() {
 			},
 		},
 		StallEventSubscribe: config.StallEventSubscribe,
+		Catalogue:           mediaDb,
 	}
 	go func() {
 		if err := dmsServer.Serve(); err != nil {
@@ -184,62 +152,8 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	<-sigs
-	err := dmsServer.Close()
+	err = dmsServer.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := cache.save(config.FFprobeCachePath); err != nil {
-		log.Print(err)
-	}
-}
-
-func (cache *fFprobeCache) load(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	dec := json.NewDecoder(f)
-	var items []dms.FfprobeCacheItem
-	err = dec.Decode(&items)
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		cache.Set(item.Key, item.Value)
-	}
-	log.Printf("added %d items from cache", len(items))
-	return nil
-}
-
-func (cache *fFprobeCache) save(path string) error {
-	cache.Lock()
-	items := cache.c.Items()
-	cache.Unlock()
-	f, err := ioutil.TempFile(filepath.Dir(path), filepath.Base(path))
-	if err != nil {
-		return err
-	}
-	enc := json.NewEncoder(f)
-	err = enc.Encode(items)
-	f.Close()
-	if err != nil {
-		os.Remove(f.Name())
-		return err
-	}
-	if runtime.GOOS == "windows" {
-		err = os.Remove(path)
-		if err == os.ErrNotExist {
-			err = nil
-		}
-	}
-	if err == nil {
-		err = os.Rename(f.Name(), path)
-	}
-	if err == nil {
-		log.Printf("saved cache with %d items", len(items))
-	} else {
-		os.Remove(f.Name())
-	}
-	return err
 }
