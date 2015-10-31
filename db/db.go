@@ -3,7 +3,6 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"github.com/anacrolix/dms/ffmpeg"
 )
 
