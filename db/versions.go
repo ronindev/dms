@@ -20,7 +20,7 @@ func updateVersion(db *sql.DB) error {
 	}
 	if dbVersion == 1 {
 		_, err := db.Exec(`
-CREATE TABLE metadata (hash TEXT PRIMARY KEY, title TEXT, ffmpegInfo TEXT);
+CREATE TABLE metadata (hash TEXT PRIMARY KEY, title TEXT, jpegThumb BLOB, pngThumb BLOB, ffmpegInfo BLOB);
 			`)
 		if err != nil {
 			return err

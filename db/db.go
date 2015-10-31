@@ -26,8 +26,8 @@ func Open(dbName string) (*Database, error) {
 func (db Database) Get(hash string) (*Metadata, error) {
 	result := &Metadata{FFmpegInfo: &ffmpeg.Info{}}
 	ffmpegRaw := make([]byte, 0)
-	err := db.base.QueryRow(`SELECT title, ffmpegInfo FROM metadata WHERE hash = ?`, hash).Scan(&result.Title,
-		&ffmpegRaw)
+	err := db.base.QueryRow(`SELECT title, jpegThumb, pngThumb, ffmpegInfo FROM metadata WHERE hash = ?`, hash).Scan(
+		&result.Title, &result.JpegThumbnail, &result.PngThumbnail, &ffmpegRaw)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -46,8 +46,8 @@ func (db Database) Set(hash string, metadata *Metadata) error {
 	if err != nil {
 		panic(err)
 	}
-	_, err = db.base.Exec(`INSERT INTO metadata (hash, title, ffmpegInfo) VALUES (?, ?, ?)`, hash,
-		metadata.Title, ffmpegInfo)
+	_, err = db.base.Exec(`INSERT INTO metadata (hash, title, jpegThumb, pngThumb, ffmpegInfo) VALUES (?, ?, ?, ?, ?)`,
+		hash, metadata.Title, metadata.JpegThumbnail, metadata.PngThumbnail, ffmpegInfo)
 	if err != nil {
 		return err
 	}

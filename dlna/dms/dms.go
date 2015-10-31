@@ -291,6 +291,13 @@ func (me mimeType) IsMedia() bool {
 	return me.Type().IsMedia()
 }
 
+func (me mimeType) IsVideo() bool {
+	if me == "application/vnd.rn-realmedia-vbr" {
+		return true
+	}
+	return me.Type().IsVideo()
+}
+
 // Attempts to guess mime type by peeling off extensions, such as those given
 // to incomplete files. TODO: This function may be misleading, since it
 // ignores non-media mime-types in processing.
@@ -380,6 +387,11 @@ func (mtt mimeTypeType) IsMedia() bool {
 	default:
 		return false
 	}
+}
+
+// Returns true if the type is video
+func (mtt mimeTypeType) IsVideo() bool {
+	return mtt == "video"
 }
 
 func parseDLNARangeHeader(val string) (ret dlna.NPTRange, err error) {
@@ -620,20 +632,17 @@ func (s *Server) filePath(_path string) string {
 func (me *Server) serveIcon(w http.ResponseWriter, r *http.Request) {
 	filePath := me.filePath(r.URL.Query().Get("path"))
 	c := r.URL.Query().Get("c")
-	if c == "" {
-		c = "png"
-	}
-	cmd := exec.Command("ffmpegthumbnailer", "-i", filePath, "-o", "/dev/stdout", "-c"+c)
-	// cmd.Stderr = os.Stderr
-	body, err := cmd.Output()
+	m, err := me.metadataProbe(filePath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.ServeContent(w, r, "", time.Now(), bytes.NewReader(body))
+	if strings.ToUpper(c) == "JPEG" {
+		http.ServeContent(w, r, "", time.Now(), bytes.NewReader(m.JpegThumbnail))
+	} else {
+		http.ServeContent(w, r, "", time.Now(), bytes.NewReader(m.PngThumbnail))
+	}
 }
-
-var timeoutSocketBelt = newSemabelt(100)
 
 func (server *Server) contentDirectoryInitialEvent(urls []*url.URL, sid string) {
 	body, err := xml.Marshal(upnp.PropertySet{
@@ -926,15 +935,28 @@ func (srv *Server) metadataProbe(path string) (*db.Metadata, error) {
 	if m == nil {
 		ffmpeg, err := ffmpeg.Probe(path)
 		err = suppressFFmpegProbeDataErrors(err)
-		if err == nil {
-			m = &db.Metadata{filename, ffmpeg}
-			err := srv.Catalogue.Set(hashsum, m)
-			if err != nil {
-				log.Printf("error saving to database file %q: %q\n", path, err)
-			}
-			return m, err
+		if err != nil {
+			return nil, err
 		}
-		return nil, err
+		var jpeg []byte
+		var png []byte
+		if mimeTypeByBaseName(path).IsVideo() {
+			jpeg, err = getFileThumbnail(path, "JPEG")
+			if err != nil {
+				log.Printf("error creating jpeg thumbnail of file %q: %s", filename, err)
+			}
+			png, err = getFileThumbnail(path, "PNG")
+			if err != nil {
+				log.Printf("error creating png thumbnail of file %q: %s", filename, err)
+			}
+		}
+		m = &db.Metadata{filename, jpeg, png, ffmpeg}
+		err = srv.Catalogue.Set(hashsum, m)
+		if err != nil {
+			log.Printf("error saving to database file %q: %q\n", path, err)
+		}
+		return m, err
+
 	}
 	return m, nil
 }
@@ -952,4 +974,9 @@ func getFileHash(filename string) (string, error) {
 	}
 	result := fmt.Sprintf("%x", md5.Sum(chunk))
 	return result, nil
+}
+
+func getFileThumbnail(path string, format string) ([]byte, error) {
+	cmd := exec.Command("ffmpegthumbnailer", "-i", path, "-o", "/dev/stdout", "-c"+format)
+	return cmd.Output()
 }
