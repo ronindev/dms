@@ -90,13 +90,14 @@ func main() {
 	config.Http = *http
 	config.FriendlyName = *friendlyName
 	config.LogHeaders = *logHeaders
+	config.MediaDBPath = *mediaDBPath
 
 	if len(*configFilePath) > 0 {
 		config.load(*configFilePath)
 	}
 
 	var err error
-	mediaDb, err = db.Open(*mediaDBPath)
+	mediaDb, err = db.Open(config.MediaDBPath)
 	if err != nil {
 		panic(err)
 	}
