@@ -51,3 +51,19 @@ func (db Database) Set(hash string, metadata *Metadata) error {
 	}
 	return nil
 }
+
+func (db Database) UpdateJpegThumbnail(hash string, thumb []byte) error {
+	_, err := db.base.Exec(`UPDATE metadata SET jpegThumb = ? WHERE hash = ?`, thumb, hash)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db Database) UpdatePngThumbnail(hash string, thumb []byte) error {
+	_, err := db.base.Exec(`UPDATE metadata SET jpegThumb = ? WHERE hash = ?`, thumb, hash)
+	if err != nil {
+		return err
+	}
+	return nil
+}

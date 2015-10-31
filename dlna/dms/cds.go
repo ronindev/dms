@@ -74,7 +74,7 @@ func (me *contentDirectoryService) cdsObjectToUpnpavObject(cdsObject object, fil
 		nativeBitrate uint
 		resDuration   string
 	)
-	metadata, probeErr := me.metadataProbe(entryFilePath)
+	metadata, _, probeErr := me.metadataProbe(entryFilePath)
 	switch probeErr {
 	case nil:
 		if metadata != nil {
