@@ -651,7 +651,12 @@ func (me *Server) serveIcon(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		me.Catalogue.SaveThumbnail(hash, c, thumb)
+		go func() {
+			err := me.Catalogue.SaveThumbnail(hash, c, thumb)
+			if err != nil {
+				log.Printf("error saving thumdnail file %q to database: %q\n", filePath, err)
+			}
+		}()
 	}
 	http.ServeContent(w, r, "", time.Now(), bytes.NewReader(thumb))
 }
@@ -952,12 +957,12 @@ func (srv *Server) metadataProbe(path string) (*db.Metadata, error) {
 			return nil, err
 		}
 		m = &db.Metadata{filename, ffmpeg}
-		err = srv.Catalogue.Set(hashsum, m)
-		if err != nil {
-			log.Printf("error saving to database file %q: %q\n", path, err)
-		}
-		return m, err
-
+		go func() {
+			err := srv.Catalogue.Set(hashsum, m)
+			if err != nil {
+				log.Printf("error saving to database file %q: %q\n", path, err)
+			}
+		}()
 	}
 	return m, nil
 }
