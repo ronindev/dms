@@ -444,7 +444,7 @@ func (me *Server) serveDLNATranscode(w http.ResponseWriter, r *http.Request, pat
 	if !ok {
 		return
 	}
-	metadata, _, _ := me.metadataProbe(path_)
+	metadata, _ := me.metadataProbe(path_)
 	if metadata != nil {
 		if duration, err := metadata.FFmpegInfo.Duration(); err == nil {
 			s := fmt.Sprintf("%f", duration.Seconds())
@@ -632,36 +632,28 @@ func (s *Server) filePath(_path string) string {
 func (me *Server) serveIcon(w http.ResponseWriter, r *http.Request) {
 	filePath := me.filePath(r.URL.Query().Get("path"))
 	c := r.URL.Query().Get("c")
-	m, hash, err := me.metadataProbe(filePath)
+	hash, err := getFileHash(filePath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if strings.ToUpper(c) == "JPEG" {
-		if m.JpegThumbnail == nil {
-			m.JpegThumbnail, err = getFileThumbnail(filePath, "JPEG")
-			if err != nil {
-				log.Printf("error creating jpeg thumbnail of file %q: %s", filePath, err)
-			}
-			err = me.Catalogue.UpdateJpegThumbnail(hash, m.JpegThumbnail)
-			if err != nil {
-				log.Printf("error updating jpeg thumbnail of file %q in database: %s", filePath, err)
-			}
-		}
-		http.ServeContent(w, r, "", time.Now(), bytes.NewReader(m.JpegThumbnail))
-	} else {
-		if m.PngThumbnail == nil {
-			m.PngThumbnail, err = getFileThumbnail(filePath, "PNG")
-			if err != nil {
-				log.Printf("error creating png thumbnail of file %q: %s", filePath, err)
-			}
-			err = me.Catalogue.UpdatePngThumbnail(hash, m.PngThumbnail)
-			if err != nil {
-				log.Printf("error updating png thumbnail of file %q in database: %s", filePath, err)
-			}
-		}
-		http.ServeContent(w, r, "", time.Now(), bytes.NewReader(m.PngThumbnail))
+	if c == "" {
+		c = "png"
 	}
+	thumb, err := me.Catalogue.GetThumbnail(hash, c)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if thumb == nil {
+		thumb, err = getFileThumbnail(filePath, c)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		me.Catalogue.SaveThumbnail(hash, c, thumb)
+	}
+	http.ServeContent(w, r, "", time.Now(), bytes.NewReader(thumb))
 }
 
 func (server *Server) contentDirectoryInitialEvent(urls []*url.URL, sid string) {
@@ -933,11 +925,11 @@ func (me *Server) location(ip net.IP) string {
 }
 
 // Can return nil info with nil err if an earlier Probe gave an error.
-func (srv *Server) metadataProbe(path string) (*db.Metadata, string, error) {
+func (srv *Server) metadataProbe(path string) (*db.Metadata, error) {
 	// We don't want relative paths in the cache.
 	path, err := filepath.Abs(path)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	filename := filepath.Base(path)
@@ -945,29 +937,29 @@ func (srv *Server) metadataProbe(path string) (*db.Metadata, string, error) {
 	hashsum, err := getFileHash(path)
 	if err != nil {
 		log.Printf("error computing hash of file %q: %q\n", path, err)
-		return nil, "", err
+		return nil, err
 	}
 	m, err := srv.Catalogue.Get(hashsum)
 	if err != nil {
 		log.Printf("error querying database: %q\n", err)
-		return nil, hashsum, err
+		return nil, err
 	}
 
 	if m == nil {
 		ffmpeg, err := ffmpeg.Probe(path)
 		err = suppressFFmpegProbeDataErrors(err)
 		if err != nil {
-			return nil, hashsum, err
+			return nil, err
 		}
-		m = &db.Metadata{filename, nil, nil, ffmpeg}
+		m = &db.Metadata{filename, ffmpeg}
 		err = srv.Catalogue.Set(hashsum, m)
 		if err != nil {
 			log.Printf("error saving to database file %q: %q\n", path, err)
 		}
-		return m, hashsum, err
+		return m, err
 
 	}
-	return m, hashsum, nil
+	return m, nil
 }
 
 func getFileHash(filename string) (string, error) {

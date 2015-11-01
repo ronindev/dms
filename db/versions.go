@@ -30,6 +30,48 @@ CREATE TABLE metadata (hash TEXT PRIMARY KEY, title TEXT, jpegThumb BLOB, pngThu
 		}
 		dbVersion++
 	}
+	if dbVersion == 2 {
+		_, err := db.Exec(`
+BEGIN TRANSACTION;
+CREATE TABLE thumbnails (
+  hash TEXT,
+  thumbType TEXT,
+  thumbValue BLOB,
+  PRIMARY KEY (hash, thumbType)
+);
+INSERT INTO thumbnails
+SELECT
+	hash,
+	'jpeg' AS thumbType,
+	jpegThumb AS thumbValue
+FROM
+	metadata
+WHERE
+	jpegThumb IS NOT NULL
+UNION
+SELECT
+	hash,
+	'png' AS thumbType,
+	pngThumb AS thumbValue
+FROM
+	metadata
+WHERE
+	pngThumb IS NOT NULL;
+
+CREATE TABLE metadata_b (hash TEXT PRIMARY KEY, title TEXT, ffmpegInfo BLOB);
+INSERT INTO metadata_b SELECT hash, title, ffmpegInfo FROM metadata;
+DROP TABLE metadata;
+ALTER TABLE metadata_b RENAME TO metadata;
+COMMIT;
+			`)
+		if err != nil {
+			return err
+		}
+		if err := updateDBVersion(db, dbVersion+1); err != nil {
+			return err
+		}
+		dbVersion++
+	}
 
 	return nil
 }

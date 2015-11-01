@@ -5,8 +5,6 @@ import (
 )
 
 type Metadata struct {
-	Title         string
-	JpegThumbnail []byte
-	PngThumbnail  []byte
-	FFmpegInfo    *ffmpeg.Info
+	Title      string
+	FFmpegInfo *ffmpeg.Info
 }
