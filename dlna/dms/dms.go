@@ -246,7 +246,7 @@ type UPnPService interface {
 	Unsubscribe(sid string) error
 }
 
-// update the UPnP object fields from ffprobe data
+/*// update the UPnP object fields from ffprobe data
 // priority is given the format section, and then the streams sequentially
 func itemExtra(item *upnpav.Object, info *ffmpeg.Info) {
 	setFromTags := func(m map[string]interface{}) {
@@ -270,7 +270,7 @@ func itemExtra(item *upnpav.Object, info *ffmpeg.Info) {
 	for _, m := range info.Streams {
 		setFromTags(m)
 	}
-}
+}*/
 
 func init() {
 	if err := mime.AddExtensionType(".rmvb", "application/vnd.rn-realmedia-vbr"); err != nil {
