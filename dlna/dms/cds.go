@@ -154,7 +154,7 @@ func (me *contentDirectoryService) readContainer(o object, host, userAgent strin
 		// TODO(anacrolix): Dig up why this special cast was added.
 		FoldersLast: strings.Contains(userAgent, `AwoX/1.1`),
 	}
-	sfis.fileInfoSlice, err = o.readDir()
+	sfis.fileInfoSlice, err = ReadDir(o.FilePath())
 	if err != nil {
 		return
 	}
@@ -336,8 +336,7 @@ func (o object) ParentID() string {
 
 // This function exists rather than just calling os.(*File).Readdir because I
 // want to stat(), not lstat() each entry.
-func (o *object) readDir() (fis []os.FileInfo, err error) {
-	dirPath := o.FilePath()
+func ReadDir(dirPath string) (fis []os.FileInfo, err error) {
 	dirFile, err := os.Open(dirPath)
 	if err != nil {
 		return

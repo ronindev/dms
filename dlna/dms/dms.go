@@ -30,6 +30,8 @@ import (
 	"github.com/anacrolix/dms/transcode"
 	"github.com/anacrolix/dms/upnp"
 	"github.com/anacrolix/dms/upnpav"
+	"html/template"
+	"sort"
 )
 
 const (
@@ -43,6 +45,7 @@ const (
 	contentDirectoryEventSubURL = "/evt/ContentDirectory"
 	serviceControlURL           = "/ctl"
 	deviceIconPath              = "/deviceIcon"
+	cataloguePath               = "/catalogue"
 )
 
 type transcodeSpec struct {
@@ -773,6 +776,79 @@ func (server *Server) contentDirectoryEventSubHandler(w http.ResponseWriter, r *
 	}
 }
 
+type catalogEntity struct {
+	Title    string
+	Url      string
+	TypeName string
+	Hash     string
+	Children []catalogEntity
+}
+
+func (server *Server) catalogueHandler(w http.ResponseWriter, r *http.Request) {
+	filePath := server.filePath(r.URL.Query().Get("path"))
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if stat.IsDir() {
+		sfi := sortableFileInfoSlice{}
+		sfi.fileInfoSlice, err = ReadDir(filePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		sort.Sort(sfi)
+		ctx := catalogEntity{
+			Title:    stat.Name(),
+			Url:      r.URL.Query().Get("path"),
+			TypeName: "directory",
+			Children: make([]catalogEntity, 0),
+		}
+
+		for _, f := range sfi.fileInfoSlice {
+			fileName := filePath + "/" + f.Name()
+			mimeType := MimeTypeByPath(fileName)
+			mimeTypeType := mimeType.Type()
+			entityUrl := ctx.Url + "/" + f.Name()
+			if f.IsDir() {
+				ctx.Children = append(ctx.Children, catalogEntity{
+					Title:    f.Name(),
+					Url:      entityUrl,
+					TypeName: "directory",
+				})
+			}
+			if mimeTypeType.IsMedia() {
+				hash, err := getFileHash(fileName)
+				if err != nil {
+					log.Printf("error computing hash for %q", fileName)
+					continue
+				}
+				m, err := server.Catalogue.Get(hash)
+				if err != nil {
+					log.Printf("error querying database for hash %s", hash)
+					continue
+				}
+
+				ctx.Children = append(ctx.Children, catalogEntity{
+					Title:    m.Title,
+					Url:      entityUrl,
+					TypeName: string(mimeTypeType),
+					Hash:     hash,
+				})
+			}
+		}
+		t, err := template.ParseFiles("web/index.html")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		t.Execute(w, ctx)
+	} else {
+		http.Error(w, "invalid path", http.StatusBadGateway)
+	}
+}
+
 func (server *Server) initMux(mux *http.ServeMux) {
 	mux.HandleFunc("/", func(resp http.ResponseWriter, req *http.Request) {
 		resp.Header().Set("content-type", "text/html")
@@ -787,6 +863,7 @@ func (server *Server) initMux(mux *http.ServeMux) {
 			log.Println(err)
 		}
 	})
+	mux.HandleFunc(cataloguePath, server.catalogueHandler)
 	mux.HandleFunc(contentDirectoryEventSubURL, server.contentDirectoryEventSubHandler)
 	mux.HandleFunc(iconPath, server.serveIcon)
 	mux.HandleFunc(resPath, func(w http.ResponseWriter, r *http.Request) {
