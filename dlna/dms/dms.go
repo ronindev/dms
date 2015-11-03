@@ -1019,12 +1019,10 @@ func (srv *Server) metadataProbe(path string) (*db.Metadata, error) {
 	hashsum, err := getFileHash(path)
 	if err != nil {
 		log.Printf("error computing hash of file %q: %q\n", path, err)
-		return nil, err
 	}
 	m, err := srv.Catalogue.Get(hashsum)
 	if err != nil {
 		log.Printf("error querying database: %q\n", err)
-		return nil, err
 	}
 
 	if m == nil {
