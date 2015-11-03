@@ -12,6 +12,7 @@
         <p>{{ if .IsDirectory }}
             <a href="catalogue?path={{ .Url }}">{{ .Title }}</a>
         {{ else }}
+            {{ if eq .TypeName "video"}}<img src="icon?path={{ .Url }}"><br> {{ end }}
             {{ .Title }}
         {{ end }}</p>
     {{ end }}
