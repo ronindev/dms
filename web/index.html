@@ -5,8 +5,15 @@
     <title>{{ .Title }}</title>
 </head>
 <body>
+    {{ if not .IsRoot }}
+    <a href="catalogue?path={{ .ParentUrl }}">Back</a>
+    {{ end }}
     {{ range .Children }}
-        {{ .Title }}
+        <p>{{ if .IsDirectory }}
+            <a href="catalogue?path={{ .Url }}">{{ .Title }}</a>
+        {{ else }}
+            {{ .Title }}
+        {{ end }}</p>
     {{ end }}
 </body>
 </html>

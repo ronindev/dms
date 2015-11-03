@@ -778,14 +778,27 @@ func (server *Server) contentDirectoryEventSubHandler(w http.ResponseWriter, r *
 
 type catalogEntity struct {
 	Title    string
+	Name     string
 	Url      string
 	TypeName string
-	Hash     string
 	Children []catalogEntity
 }
 
+func (c catalogEntity) IsDirectory() bool {
+	return c.TypeName == "directory"
+}
+
+func (c catalogEntity) ParentUrl() string {
+	return strings.TrimSuffix(c.Url, "/"+c.Name)
+}
+
+func (c catalogEntity) IsRoot() bool {
+	return c.Url == "/" || c.Url == ""
+}
+
 func (server *Server) catalogueHandler(w http.ResponseWriter, r *http.Request) {
-	filePath := server.filePath(r.URL.Query().Get("path"))
+	pathParam := r.URL.Query().Get("path")
+	filePath := server.filePath(pathParam)
 	stat, err := os.Stat(filePath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -801,40 +814,37 @@ func (server *Server) catalogueHandler(w http.ResponseWriter, r *http.Request) {
 		sort.Sort(sfi)
 		ctx := catalogEntity{
 			Title:    stat.Name(),
-			Url:      r.URL.Query().Get("path"),
+			Name:     stat.Name(),
+			Url:      pathParam,
 			TypeName: "directory",
 			Children: make([]catalogEntity, 0),
 		}
 
 		for _, f := range sfi.fileInfoSlice {
-			fileName := filePath + "/" + f.Name()
+			fileName := filepath.Join(filePath, f.Name())
 			mimeType := MimeTypeByPath(fileName)
 			mimeTypeType := mimeType.Type()
 			entityUrl := ctx.Url + "/" + f.Name()
 			if f.IsDir() {
 				ctx.Children = append(ctx.Children, catalogEntity{
 					Title:    f.Name(),
+					Name:     f.Name(),
 					Url:      entityUrl,
 					TypeName: "directory",
 				})
 			}
 			if mimeTypeType.IsMedia() {
-				hash, err := getFileHash(fileName)
+				m, err := server.metadataProbe(fileName)
 				if err != nil {
-					log.Printf("error computing hash for %q", fileName)
-					continue
-				}
-				m, err := server.Catalogue.Get(hash)
-				if err != nil {
-					log.Printf("error querying database for hash %s", hash)
+					log.Printf("error probing file %s", fileName)
 					continue
 				}
 
 				ctx.Children = append(ctx.Children, catalogEntity{
 					Title:    m.Title,
+					Name:     f.Name(),
 					Url:      entityUrl,
 					TypeName: string(mimeTypeType),
-					Hash:     hash,
 				})
 			}
 		}
